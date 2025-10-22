@@ -473,7 +473,13 @@ module.exports =   function (app) {
 		function deviceNameAndAddress(config){
 			return `${config?.name??""}${config.name?" at ":""}${config.mac_address}`
 		}
-		
+
+		async function recycleBluetoothAdapter(reason) {
+			plugin.debug(`${reason} Recycling Bluetooth adapter.`)
+			await adapter.setPowered(false)
+			await adapter.setPowered(true)
+		}
+
 		function createSensor(adapter, config) {
 			return new Promise( ( resolve, reject )=>{
 			var s
@@ -500,20 +506,22 @@ module.exports =   function (app) {
 				else{
 					const device = new OutOfRangeDevice(adapter, config)
 					s = await instantiateSensor(device,config)
-					device.once("deviceFound",async (device)=>{
-						s.device=device
-						s.listen()
-						if (config.active)
-							await s.activate(config, plugin)
-						else {
-							s.unsetError()
-							s.setState("DORMANT")
-						}
-						removeSensorFromList(s)
+					if (s) {
+						device.once("deviceFound",async (device)=>{
+							s.device=device
+							s.listen()
+							if (config.active)
+								await s.activate(config, plugin)
+							else {
+								s.unsetError()
+								s.setState("DORMANT")
+							}
+							removeSensorFromList(s)
+							addSensorToList(s)
+						})
 						addSensorToList(s)
-					})
-					addSensorToList(s)
-					resolve(s)
+						resolve(s)
+					}
 				}
 				if (startNumber == starts ) {
 					const errorTxt = `Unable to communicate with device ${deviceNameAndAddress(config)} Reason: ${e?.message??e}`
@@ -768,22 +776,27 @@ module.exports =   function (app) {
 		
 
 		deviceHealthID = setInterval( async ()=> {
+			lastContactDelta=Infinity
+			let hasOutOfRangeError = false
 			sensorMap.forEach((sensor)=>{
 				const config = getDeviceConfig(sensor.getMacAddress())
 				const dt = config?.discoveryTimeout??options.discoveryTimeout
 				const lc=sensor.elapsedTimeSinceLastContact()
 				if (lc<lastContactDelta) //get min last contact delta
 					lastContactDelta=lc
-				if (lc > dt) { 
+				if (lc > dt) {
 					updateSensor(sensor)
 				}
+				if (sensor.getState() === "OUT_OF_RANGE" && sensor.isError()) {
+					hasOutOfRangeError = true
+				}
 			})
-			if (sensorMap.size && lastContactDelta > options.inactivityTimeout)
+			if (hasOutOfRangeError) {
+				await recycleBluetoothAdapter(`OUT_OF_RANGE sensor with error detected.`)
+			}
+			else if (sensorMap.size && lastContactDelta > options.inactivityTimeout)
 			{
-				
-				plugin.debug(`No contact with any sensors for ${lastContactDelta} seconds. Recycling Bluetooth adapter.`)	
-				await adapter.setPowered(false)
-				await adapter.setPowered(true)
+				await recycleBluetoothAdapter(`No contact with any sensors for ${lastContactDelta} seconds.`)
 			}
 
 		}, intervalTimeout)
