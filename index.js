@@ -777,7 +777,6 @@ module.exports =   function (app) {
 
 		deviceHealthID = setInterval( async ()=> {
 			lastContactDelta=Infinity
-			let hasOutOfRangeError = false
 			sensorMap.forEach((sensor)=>{
 				const config = getDeviceConfig(sensor.getMacAddress())
 				const dt = config?.discoveryTimeout??options.discoveryTimeout
@@ -787,15 +786,8 @@ module.exports =   function (app) {
 				if (lc > dt) {
 					updateSensor(sensor)
 				}
-				if (sensor.getState() === "OUT_OF_RANGE" && sensor.isError()) {
-					hasOutOfRangeError = true
-				}
 			})
-			if (hasOutOfRangeError) {
-				await recycleBluetoothAdapter(`OUT_OF_RANGE sensor with error detected.`)
-			}
-			else if (sensorMap.size && lastContactDelta > options.inactivityTimeout)
-			{
+			if (sensorMap.size && lastContactDelta > options.inactivityTimeout) {
 				await recycleBluetoothAdapter(`No contact with any sensors for ${lastContactDelta} seconds.`)
 			}
 
