@@ -474,12 +474,6 @@ module.exports =   function (app) {
 			return `${config?.name??""}${config.name?" at ":""}${config.mac_address}`
 		}
 
-		async function recycleBluetoothAdapter(reason) {
-			plugin.debug(`${reason} Recycling Bluetooth adapter.`)
-			await adapter.setPowered(false)
-			await adapter.setPowered(true)
-		}
-
 		function createSensor(adapter, config) {
 			return new Promise( ( resolve, reject )=>{
 			var s
@@ -775,22 +769,30 @@ module.exports =   function (app) {
 		
 		
 
-		deviceHealthID = setInterval( async ()=> {
-			lastContactDelta=Infinity
-			sensorMap.forEach((sensor)=>{
+		deviceHealthID = setInterval(async () => {
+			lastContactDelta = Infinity // Reset at start of each check
+			let hasNaN = false			
+			sensorMap.forEach((sensor) => {
 				const config = getDeviceConfig(sensor.getMacAddress())
-				const dt = config?.discoveryTimeout??options.discoveryTimeout
-				const lc=sensor.elapsedTimeSinceLastContact()
-				if (lc<lastContactDelta) //get min last contact delta
-					lastContactDelta=lc
-				if (lc > dt) {
-					updateSensor(sensor)
+				const dt = config?.discoveryTimeout ?? options.discoveryTimeout
+				const lc = sensor.elapsedTimeSinceLastContact()
+				if (isNaN(lc)) {
+					hasNaN = true
+				} else {
+					if (lc < lastContactDelta) {
+						lastContactDelta = lc
+					}
+					if (lc > dt) { 
+						updateSensor(sensor)
+					}
 				}
 			})
-			if (sensorMap.size && lastContactDelta > options.inactivityTimeout) {
-				await recycleBluetoothAdapter(`No contact with any sensors for ${lastContactDelta} seconds.`)
+			if (sensorMap.size && (hasNaN || lastContactDelta > options.inactivityTimeout)) {
+				const reason = hasNaN ? 'sensor contact data unavailable (NaN)' : `no contact for ${lastContactDelta} seconds`
+				plugin.debug(`${reason}. Recycling Bluetooth adapter.`)
+				await adapter.setPowered(false)
+				await adapter.setPowered(true)
 			}
-
 		}, intervalTimeout)
 		
 		if (!options.hasOwnProperty("discoveryInterval" )) //no config -- first run
